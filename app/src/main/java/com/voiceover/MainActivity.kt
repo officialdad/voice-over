@@ -22,6 +22,10 @@ import kotlinx.coroutines.withContext
 
 class MainActivity : AppCompatActivity() {
 
+    companion object {
+        private const val KEY_SELECTED_VIDEO_URI = "selected_video_uri"
+    }
+
     private var selectedVideoUri: Uri? = null
 
     private lateinit var videoThumbnail: ImageView
@@ -79,6 +83,19 @@ class MainActivity : AppCompatActivity() {
                 }
                 startActivity(intent)
             }
+        }
+
+        // Restore selected video URI after rotation
+        savedInstanceState?.getString(KEY_SELECTED_VIDEO_URI)?.let { uriString ->
+            val uri = Uri.parse(uriString)
+            onVideoSelected(uri)
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        selectedVideoUri?.let { uri ->
+            outState.putString(KEY_SELECTED_VIDEO_URI, uri.toString())
         }
     }
 

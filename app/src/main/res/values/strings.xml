@@ -24,4 +24,6 @@
     <string name="segments_count">%d segment(s) recorded</string>
     <string name="tap_to_record">Seek to position, then tap to record</string>
     <string name="ready_to_record">Ready to record at current position</string>
+    <string name="original_audio">Original Audio</string>
+    <string name="voice_over_audio">Voice Over</string>
 </resources>

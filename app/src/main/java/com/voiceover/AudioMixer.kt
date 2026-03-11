@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import android.media.MediaMetadataRetriever
 import android.media.MediaMuxer
 import android.net.Uri
 import android.util.Log
@@ -16,58 +17,76 @@ class AudioMixer(private val context: Context) {
         private const val TAG = "AudioMixer"
     }
 
+    var lastMergeLog: String = ""
+        private set
+
     fun mergeAudioVideo(videoUri: Uri, audioFile: File, outputFile: File): Boolean {
+        val log = StringBuilder()
         var muxer: MediaMuxer? = null
         var videoExtractor: MediaExtractor? = null
         var audioExtractor: MediaExtractor? = null
+        var videoFd: android.os.ParcelFileDescriptor? = null
 
         try {
+            log.appendLine("audioFile exists=${audioFile.exists()} size=${audioFile.length()}")
             muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
 
-            // Extract video track
-            videoExtractor = MediaExtractor().apply {
-                context.contentResolver.openFileDescriptor(videoUri, "r")?.use { fd ->
-                    setDataSource(fd.fileDescriptor)
-                } ?: return false
+            // Preserve original video rotation
+            val retriever = MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(context, videoUri)
+                val rotation = retriever.extractMetadata(
+                    MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION
+                )?.toIntOrNull() ?: 0
+                log.appendLine("rotation=$rotation")
+                if (rotation != 0) {
+                    muxer.setOrientationHint(rotation)
+                }
+            } finally {
+                retriever.release()
             }
+
+            // Extract video track
+            videoFd = context.contentResolver.openFileDescriptor(videoUri, "r")
+            if (videoFd == null) { log.appendLine("FAIL: video fd null"); lastMergeLog = log.toString(); return false }
+            videoExtractor = MediaExtractor().apply { setDataSource(videoFd.fileDescriptor) }
 
             val videoTrackIndex = findTrack(videoExtractor, "video/")
-            if (videoTrackIndex < 0) return false
-
+            if (videoTrackIndex < 0) { log.appendLine("FAIL: no video track"); lastMergeLog = log.toString(); return false }
             videoExtractor.selectTrack(videoTrackIndex)
             val videoFormat = videoExtractor.getTrackFormat(videoTrackIndex)
+            log.appendLine("videoFmt: ${videoFormat.getString(MediaFormat.KEY_MIME)}")
             val muxerVideoTrack = muxer.addTrack(videoFormat)
 
-            // Extract audio track from recorded audio
-            audioExtractor = MediaExtractor().apply {
-                setDataSource(audioFile.absolutePath)
-            }
-
+            // Extract audio track from pre-mixed audio file
+            audioExtractor = MediaExtractor().apply { setDataSource(audioFile.absolutePath) }
             val audioTrackIndex = findTrack(audioExtractor, "audio/")
-            if (audioTrackIndex < 0) return false
-
+            if (audioTrackIndex < 0) { log.appendLine("FAIL: no audio track in merged file"); lastMergeLog = log.toString(); return false }
             audioExtractor.selectTrack(audioTrackIndex)
             val audioFormat = audioExtractor.getTrackFormat(audioTrackIndex)
+            log.appendLine("audioFmt: ${audioFormat.getString(MediaFormat.KEY_MIME)}")
             val muxerAudioTrack = muxer.addTrack(audioFormat)
 
             muxer.start()
-
-            // Write video track
+            log.appendLine("Writing video samples...")
             writeSamples(videoExtractor, muxer, muxerVideoTrack)
-
-            // Write audio track
+            log.appendLine("Writing audio samples...")
             writeSamples(audioExtractor, muxer, muxerAudioTrack)
-
             muxer.stop()
-            return true
 
+            log.appendLine("OK output size=${outputFile.length()}")
+            lastMergeLog = log.toString()
+            return true
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to merge audio and video", e)
+            log.appendLine("EXCEPTION: ${e.message}")
+            log.appendLine(e.stackTraceToString().take(500))
+            lastMergeLog = log.toString()
             return false
         } finally {
             try { muxer?.release() } catch (_: Exception) {}
             try { videoExtractor?.release() } catch (_: Exception) {}
             try { audioExtractor?.release() } catch (_: Exception) {}
+            try { videoFd?.close() } catch (_: Exception) {}
         }
     }
 
@@ -81,20 +100,26 @@ class AudioMixer(private val context: Context) {
     }
 
     private fun writeSamples(extractor: MediaExtractor, muxer: MediaMuxer, trackIndex: Int) {
-        val buffer = ByteBuffer.allocate(256 * 1024)
+        var buffer = ByteBuffer.allocate(1024 * 1024) // 1MB initial
         val bufferInfo = MediaCodec.BufferInfo()
 
         while (true) {
-            val sampleSize = extractor.readSampleData(buffer, 0)
-            if (sampleSize < 0) break
+            try {
+                val sampleSize = extractor.readSampleData(buffer, 0)
+                if (sampleSize < 0) break
 
-            bufferInfo.offset = 0
-            bufferInfo.size = sampleSize
-            bufferInfo.presentationTimeUs = extractor.sampleTime
-            bufferInfo.flags = extractor.sampleFlags
+                bufferInfo.offset = 0
+                bufferInfo.size = sampleSize
+                bufferInfo.presentationTimeUs = extractor.sampleTime
+                bufferInfo.flags = extractor.sampleFlags
 
-            muxer.writeSampleData(trackIndex, buffer, bufferInfo)
-            extractor.advance()
+                muxer.writeSampleData(trackIndex, buffer, bufferInfo)
+                extractor.advance()
+            } catch (e: IllegalArgumentException) {
+                // Buffer too small for this sample, double it and retry
+                val newSize = buffer.capacity() * 2
+                buffer = ByteBuffer.allocate(newSize)
+            }
         }
     }
 }

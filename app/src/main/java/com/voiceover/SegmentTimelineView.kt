@@ -2,11 +2,12 @@ package com.voiceover
 
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.View
-import androidx.core.content.ContextCompat
+import com.google.android.material.color.MaterialColors
 
 class SegmentTimelineView @JvmOverloads constructor(
     context: Context,
@@ -19,16 +20,16 @@ class SegmentTimelineView @JvmOverloads constructor(
     private var currentPositionMs: Long = 0
 
     private val segmentPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = ContextCompat.getColor(context, R.color.secondary)
+        color = MaterialColors.getColor(context, com.google.android.material.R.attr.colorPrimary, Color.MAGENTA)
     }
 
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = ContextCompat.getColor(context, R.color.on_surface_secondary)
+        color = MaterialColors.getColor(context, com.google.android.material.R.attr.colorSurfaceVariant, Color.DKGRAY)
         alpha = 50
     }
 
     private val positionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = ContextCompat.getColor(context, R.color.white)
+        color = MaterialColors.getColor(context, com.google.android.material.R.attr.colorOnSurface, Color.WHITE)
         strokeWidth = 3f
     }
 

@@ -1,10 +1,12 @@
 package com.voiceover
 
+import android.content.Context
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
+import android.net.Uri
 import android.util.Log
 import java.io.File
 import java.nio.ByteBuffer
@@ -97,29 +99,51 @@ class SegmentManager {
         _segments.addAll(toAdd)
     }
 
-    fun mergeToFile(videoDurationMs: Long, outputFile: File): Boolean {
-        if (_segments.isEmpty()) return false
+    /** Collects debug info from the last mergeToFile call */
+    var lastMergeLog: String = ""
+        private set
+
+    fun mergeToFile(
+        videoDurationMs: Long,
+        outputFile: File,
+        voiceVolume: Float = 1.0f,
+        originalVolume: Float = 0f,
+        videoUri: Uri? = null,
+        context: Context? = null
+    ): Boolean {
+        val log = StringBuilder()
+        if (_segments.isEmpty()) { lastMergeLog = "No segments"; return false }
 
         try {
+            log.appendLine("mergeToFile: segs=${_segments.size}, dur=${videoDurationMs}ms, voiceVol=$voiceVolume, origVol=$originalVolume")
+            for ((i, seg) in _segments.withIndex()) {
+                log.appendLine("  seg[$i]: start=${seg.startPositionMs}ms, dur=${seg.durationMs}ms, exists=${seg.audioFile.exists()}, size=${seg.audioFile.length()}")
+            }
+
             // Cap to prevent OOM
             val effectiveDurationMs = minOf(videoDurationMs, MAX_DURATION_MS)
             val totalSamples = (effectiveDurationMs * SAMPLE_RATE / 1000).toInt()
 
             // Check memory availability before allocating
+            log.appendLine("totalSamples=$totalSamples, effectiveDur=$effectiveDurationMs")
             val requiredBytes = totalSamples.toLong() * 2
             val runtime = Runtime.getRuntime()
             val availableMemory = runtime.maxMemory() - runtime.totalMemory() + runtime.freeMemory()
             if (requiredBytes > availableMemory / 2) {
-                Log.e(TAG, "Insufficient memory for merge: need ${requiredBytes}B, available ${availableMemory}B")
-                return false
+                log.appendLine("OOM: need ${requiredBytes}B, avail ${availableMemory}B")
+                lastMergeLog = log.toString(); return false
             }
 
             val pcmBuffer = ShortArray(totalSamples)
 
             // Decode each segment and place at correct position
-            for (segment in _segments) {
+            for ((i, segment) in _segments.withIndex()) {
                 val segmentPcm = decodeToPcm(segment.audioFile, SAMPLE_RATE)
-                    ?: continue
+                if (segmentPcm == null) {
+                    log.appendLine("  seg[$i] decode FAILED")
+                    continue
+                }
+                log.appendLine("  seg[$i] decoded ${segmentPcm.size} samples")
                 val offset = (segment.startPositionMs * SAMPLE_RATE / 1000).toInt()
                 val copyLength = minOf(segmentPcm.size, totalSamples - offset)
                 if (copyLength > 0) {
@@ -127,10 +151,38 @@ class SegmentManager {
                 }
             }
 
+            // Apply voice volume
+            if (voiceVolume != 1.0f) {
+                for (i in pcmBuffer.indices) {
+                    pcmBuffer[i] = (pcmBuffer[i] * voiceVolume).toInt()
+                        .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+                }
+            }
+
+            // Mix in original video audio if volume > 0
+            if (originalVolume > 0f && videoUri != null && context != null) {
+                log.appendLine("Decoding original audio...")
+                val origPcm = decodeOriginalAudio(context, videoUri)
+                log.appendLine("Original audio: ${origPcm?.size ?: "null"} samples")
+                if (origPcm != null) {
+                    val mixLength = minOf(pcmBuffer.size, origPcm.size)
+                    for (i in 0 until mixLength) {
+                        val mixed = pcmBuffer[i].toInt() + (origPcm[i] * originalVolume).toInt()
+                        pcmBuffer[i] = mixed.coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+                    }
+                }
+            }
+
             // Encode PCM to AAC file
-            return encodeToAac(pcmBuffer, SAMPLE_RATE, CHANNELS, outputFile)
+            log.appendLine("Encoding ${pcmBuffer.size} samples to AAC...")
+            val result = encodeToAac(pcmBuffer, SAMPLE_RATE, CHANNELS, outputFile)
+            log.appendLine("Encode result=$result, exists=${outputFile.exists()}, size=${outputFile.length()}")
+            lastMergeLog = log.toString()
+            return result
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to merge segments to file", e)
+            log.appendLine("EXCEPTION: ${e.message}")
+            log.appendLine(e.stackTraceToString().take(500))
+            lastMergeLog = log.toString()
             return false
         }
     }
@@ -336,5 +388,123 @@ class SegmentManager {
         }
         muxer.release()
         return true
+    }
+
+    private fun decodeOriginalAudio(context: Context, videoUri: Uri): ShortArray? {
+        val fd = context.contentResolver.openFileDescriptor(videoUri, "r") ?: return null
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(fd.fileDescriptor)
+
+            var audioTrack = -1
+            for (i in 0 until extractor.trackCount) {
+                val format = extractor.getTrackFormat(i)
+                val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
+                if (mime.startsWith("audio/")) {
+                    audioTrack = i
+                    break
+                }
+            }
+            if (audioTrack < 0) return null
+
+            extractor.selectTrack(audioTrack)
+            val format = extractor.getTrackFormat(audioTrack)
+            val mime = format.getString(MediaFormat.KEY_MIME) ?: return null
+            val sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+            val channelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+
+            val codec = MediaCodec.createDecoderByType(mime)
+            codec.configure(format, null, null, 0)
+            codec.start()
+
+            val pcmChunks = mutableListOf<ShortArray>()
+            val bufferInfo = MediaCodec.BufferInfo()
+            var inputDone = false
+            var outputDone = false
+
+            while (!outputDone) {
+                if (!inputDone) {
+                    val inputIndex = codec.dequeueInputBuffer(10000)
+                    if (inputIndex >= 0) {
+                        val inputBuffer = codec.getInputBuffer(inputIndex)
+                        if (inputBuffer == null) {
+                            codec.queueInputBuffer(inputIndex, 0, 0, 0, 0)
+                        } else {
+                            val sampleSize = extractor.readSampleData(inputBuffer, 0)
+                            if (sampleSize < 0) {
+                                codec.queueInputBuffer(inputIndex, 0, 0, 0,
+                                    MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                                inputDone = true
+                            } else {
+                                codec.queueInputBuffer(inputIndex, 0, sampleSize,
+                                    extractor.sampleTime, 0)
+                                extractor.advance()
+                            }
+                        }
+                    }
+                }
+
+                val outputIndex = codec.dequeueOutputBuffer(bufferInfo, 10000)
+                if (outputIndex >= 0) {
+                    if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                        outputDone = true
+                    }
+                    val outputBuffer = codec.getOutputBuffer(outputIndex)
+                    if (outputBuffer != null && bufferInfo.size > 0) {
+                        val shortBuffer = outputBuffer.order(ByteOrder.nativeOrder()).asShortBuffer()
+                        val samples = ShortArray(shortBuffer.remaining())
+                        shortBuffer.get(samples)
+
+                        val monoSamples = if (channelCount > 1) {
+                            ShortArray(samples.size / channelCount) { i ->
+                                var sum = 0L
+                                for (ch in 0 until channelCount) {
+                                    sum += samples[i * channelCount + ch]
+                                }
+                                (sum / channelCount).toShort()
+                            }
+                        } else {
+                            samples
+                        }
+
+                        val resampled = if (sampleRate != SAMPLE_RATE) {
+                            val ratio = sampleRate.toDouble() / SAMPLE_RATE
+                            val outputSize = (monoSamples.size / ratio).toInt()
+                            ShortArray(outputSize) { i ->
+                                val srcPos = i * ratio
+                                val srcIndex = srcPos.toInt()
+                                val fraction = srcPos - srcIndex
+                                val s0 = monoSamples[minOf(srcIndex, monoSamples.size - 1)]
+                                val s1 = monoSamples[minOf(srcIndex + 1, monoSamples.size - 1)]
+                                (s0 + (s1 - s0) * fraction).toInt().toShort()
+                            }
+                        } else {
+                            monoSamples
+                        }
+
+                        pcmChunks.add(resampled)
+                    }
+                    codec.releaseOutputBuffer(outputIndex, false)
+                }
+            }
+
+            codec.stop()
+            codec.release()
+
+            val totalSize = pcmChunks.sumOf { it.size }
+            val result = ShortArray(totalSize)
+            var pos = 0
+            for (chunk in pcmChunks) {
+                chunk.copyInto(result, pos)
+                pos += chunk.size
+            }
+            return result
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to decode original audio", e)
+            return null
+        } finally {
+            extractor.release()
+            try { fd.close() } catch (_: Exception) {}
+        }
     }
 }

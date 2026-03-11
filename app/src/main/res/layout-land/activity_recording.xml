@@ -6,17 +6,24 @@
     android:layout_height="match_parent"
     android:background="?android:attr/colorBackground">
 
+    <!-- Vertical guideline at 50% -->
+    <androidx.constraintlayout.widget.Guideline
+        android:id="@+id/guideline_center"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        app:layout_constraintGuide_percent="0.5" />
+
+    <!-- Video area - left half -->
     <FrameLayout
         android:id="@+id/videoContainer"
         android:layout_width="0dp"
         android:layout_height="0dp"
         android:background="@android:color/black"
-        app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintBottom_toTopOf="@id/controlsScroll"
-        app:layout_constraintHeight_default="percent"
-        app:layout_constraintHeight_percent="0.45">
+        app:layout_constraintEnd_toStartOf="@id/guideline_center"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent">
 
         <VideoView
             android:id="@+id/videoView"
@@ -35,7 +42,6 @@
             android:visibility="gone"
             android:contentDescription="@string/preview"
             app:tint="@android:color/white" />
-
         <ProgressBar
             android:id="@+id/loadingSpinner"
             android:layout_width="48dp"
@@ -46,29 +52,27 @@
 
     </FrameLayout>
 
+    <!-- Controls area - right half, scrollable -->
     <ScrollView
-        android:id="@+id/controlsScroll"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        app:layout_constraintTop_toBottomOf="@id/videoContainer"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
+        app:layout_constraintStart_toEndOf="@id/guideline_center"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent">
 
         <LinearLayout
-            android:id="@+id/controlsContainer"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:gravity="center_horizontal"
-            android:padding="16dp"
-            android:background="?attr/colorSurface">
+            android:padding="16dp">
 
-            <!-- Seekbar -->
+            <!-- SeekBar -->
             <SeekBar
                 android:id="@+id/seekBar"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp" />
 
             <!-- Timeline -->
             <com.voiceover.SegmentTimelineView
@@ -80,21 +84,22 @@
             <!-- Time display -->
             <TextView
                 android:id="@+id/timeText"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="00:00 / 00:00"
                 android:textAppearance="?attr/textAppearanceBodyMedium"
                 android:textColor="?attr/colorOnSurfaceVariant"
+                android:gravity="center"
+                android:text="00:00 / 00:00"
                 android:layout_marginTop="4dp" />
 
             <!-- Segment count -->
             <TextView
                 android:id="@+id/segmentCountText"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:textAppearance="?attr/textAppearanceLabelMedium"
                 android:textColor="?attr/colorOnSurfaceVariant"
-                android:layout_marginTop="2dp"
+                android:gravity="center"
                 android:visibility="gone" />
 
             <!-- Volume controls -->
@@ -102,8 +107,7 @@
                 android:id="@+id/volumeControls"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:layout_marginTop="8dp">
+                android:orientation="vertical">
 
                 <TextView
                     android:layout_width="wrap_content"
@@ -139,91 +143,95 @@
 
             </LinearLayout>
 
-            <!-- Status text -->
-            <TextView
-                android:id="@+id/statusText"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/start_recording"
-                android:textAppearance="?attr/textAppearanceBodyMedium"
-                android:textColor="?attr/colorOnSurfaceVariant"
-                android:layout_marginTop="12dp"
-                android:layout_marginBottom="12dp" />
-
-            <!-- FAB with pulse -->
-            <FrameLayout
-                android:layout_width="80dp"
-                android:layout_height="80dp"
-                android:layout_marginBottom="12dp"
-                android:importantForAccessibility="no">
-
-                <View
-                    android:id="@+id/recordPulse"
-                    android:layout_width="80dp"
-                    android:layout_height="80dp"
-                    android:background="@drawable/circle_pulse"
-                    android:importantForAccessibility="no"
-                    android:visibility="invisible" />
-
-                <com.google.android.material.floatingactionbutton.FloatingActionButton
-                    android:id="@+id/recordFab"
-                    style="@style/Widget.Material3.FloatingActionButton.Primary"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_gravity="center"
-                    android:contentDescription="@string/start_recording"
-                    app:backgroundTint="@color/record_red"
-                    app:fabCustomSize="64dp"
-                    app:maxImageSize="32dp"
-                    app:tint="?attr/colorOnPrimary"
-                    app:srcCompat="@drawable/ic_mic" />
-
-            </FrameLayout>
-
-            <!-- Stop button -->
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/stopButton"
-                style="@style/Widget.Material3.Button.OutlinedButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:minHeight="48dp"
-                android:layout_marginBottom="8dp"
-                android:text="@string/stop_recording"
-                android:visibility="gone" />
-
-            <!-- Re-record and Save -->
+            <!-- Controls container -->
             <LinearLayout
+                android:id="@+id/controlsContainer"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center">
+                android:orientation="vertical"
+                android:gravity="center_horizontal"
+                android:padding="16dp"
+                android:background="?attr/colorSurface">
 
+                <!-- Status text -->
+                <TextView
+                    android:id="@+id/statusText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="?attr/textAppearanceBodyMedium"
+                    android:textColor="?attr/colorOnSurfaceVariant"
+                    android:text="@string/tap_to_record" />
+
+                <!-- FAB with pulse -->
+                <FrameLayout
+                    android:layout_width="80dp"
+                    android:layout_height="80dp"
+                    android:layout_marginTop="8dp"
+                    android:importantForAccessibility="no">
+
+                    <View
+                        android:id="@+id/recordPulse"
+                        android:layout_width="80dp"
+                        android:layout_height="80dp"
+                        android:background="@drawable/circle_pulse"
+                        android:importantForAccessibility="no"
+                        android:visibility="invisible" />
+
+                    <com.google.android.material.floatingactionbutton.FloatingActionButton
+                        android:id="@+id/recordFab"
+                        style="@style/Widget.Material3.FloatingActionButton.Primary"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center"
+                        android:contentDescription="@string/start_recording"
+                        app:backgroundTint="@color/record_red"
+                        app:fabCustomSize="64dp"
+                        app:maxImageSize="24dp"
+                        app:srcCompat="@drawable/ic_mic" />
+
+                </FrameLayout>
+
+                <!-- Stop button -->
                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/reRecordButton"
+                    android:id="@+id/stopButton"
                     style="@style/Widget.Material3.Button.OutlinedButton"
-                    android:layout_width="0dp"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
                     android:minHeight="48dp"
-                    android:layout_marginEnd="8dp"
-                    android:text="@string/re_record"
+                    android:layout_marginTop="8dp"
+                    android:text="@string/stop_recording"
                     android:visibility="gone" />
 
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/saveButton"
-                    style="@style/Widget.Material3.Button"
-                    android:layout_width="0dp"
+                <!-- Re-record and Save -->
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:minHeight="48dp"
-                    android:layout_marginStart="8dp"
-                    android:text="@string/save_video"
-                    android:visibility="gone" />
+                    android:orientation="horizontal"
+                    android:gravity="center"
+                    android:layout_marginTop="8dp">
 
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/reRecordButton"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:minHeight="48dp"
+                        android:text="@string/re_record"
+                        android:visibility="gone" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/saveButton"
+                        style="@style/Widget.Material3.Button"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginStart="8dp"
+                        android:minHeight="48dp"
+                        android:text="@string/save_video"
+                        android:visibility="gone" />
+                </LinearLayout>
             </LinearLayout>
-
         </LinearLayout>
-
     </ScrollView>
-
 </androidx.constraintlayout.widget.ConstraintLayout>
