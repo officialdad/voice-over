@@ -10,12 +10,15 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
 import com.google.android.material.button.MaterialButton
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : AppCompatActivity() {
 
@@ -25,6 +28,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var placeholderText: TextView
     private lateinit var selectButton: MaterialButton
     private lateinit var recordButton: MaterialButton
+
+    private val scope = MainScope()
 
     private val requiredPermissions: Array<String>
         get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -97,23 +102,37 @@ class MainActivity : AppCompatActivity() {
             // Not all providers support persistable permissions
         }
 
-        // Show thumbnail
-        try {
-            val retriever = MediaMetadataRetriever()
-            retriever.setDataSource(this, uri)
-            val bitmap = retriever.frameAtTime
-            retriever.release()
+        // Load thumbnail off main thread
+        scope.launch {
+            val bitmap = withContext(Dispatchers.IO) {
+                try {
+                    val retriever = MediaMetadataRetriever()
+                    try {
+                        retriever.setDataSource(this@MainActivity, uri)
+                        retriever.frameAtTime
+                    } finally {
+                        retriever.release()
+                    }
+                } catch (_: Exception) {
+                    null
+                }
+            }
 
             if (bitmap != null) {
                 videoThumbnail.setImageBitmap(bitmap)
                 videoThumbnail.visibility = android.view.View.VISIBLE
                 placeholderText.visibility = android.view.View.GONE
+            } else {
+                placeholderText.text = "Video selected"
+                placeholderText.visibility = android.view.View.VISIBLE
             }
-        } catch (e: Exception) {
-            placeholderText.text = "Video selected"
-            placeholderText.visibility = android.view.View.VISIBLE
         }
 
         recordButton.isEnabled = true
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        scope.cancel()
     }
 }

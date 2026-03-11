@@ -6,6 +6,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.View
+import androidx.core.content.ContextCompat
 
 class SegmentTimelineView @JvmOverloads constructor(
     context: Context,
@@ -18,15 +19,16 @@ class SegmentTimelineView @JvmOverloads constructor(
     private var currentPositionMs: Long = 0
 
     private val segmentPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFF03DAC6.toInt() // secondary/teal color
+        color = ContextCompat.getColor(context, R.color.secondary)
     }
 
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0x33FFFFFF // subtle white overlay
+        color = ContextCompat.getColor(context, R.color.on_surface_secondary)
+        alpha = 50
     }
 
     private val positionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFFFFFFFF.toInt()
+        color = ContextCompat.getColor(context, R.color.white)
         strokeWidth = 3f
     }
 
@@ -60,14 +62,16 @@ class SegmentTimelineView @JvmOverloads constructor(
 
         // Draw segments
         for (segment in segments) {
-            val startX = (segment.startPositionMs.toFloat() / videoDurationMs) * w
-            val endX = (segment.endPositionMs.toFloat() / videoDurationMs) * w
-            rect.set(startX, 0f, endX, h)
-            canvas.drawRoundRect(rect, cornerRadius, cornerRadius, segmentPaint)
+            val startX = ((segment.startPositionMs.toFloat() / videoDurationMs) * w).coerceIn(0f, w)
+            val endX = ((segment.endPositionMs.toFloat() / videoDurationMs) * w).coerceIn(0f, w)
+            if (endX > startX) {
+                rect.set(startX, 0f, endX, h)
+                canvas.drawRoundRect(rect, cornerRadius, cornerRadius, segmentPaint)
+            }
         }
 
         // Position indicator
-        val posX = (currentPositionMs.toFloat() / videoDurationMs) * w
+        val posX = ((currentPositionMs.toFloat() / videoDurationMs) * w).coerceIn(0f, w)
         canvas.drawLine(posX, 0f, posX, h, positionPaint)
     }
 }

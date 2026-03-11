@@ -10,6 +10,7 @@ import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
+import android.util.Log
 import android.view.View
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.SeekBar
@@ -20,6 +21,7 @@ import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -27,6 +29,10 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 class RecordingActivity : AppCompatActivity() {
+
+    companion object {
+        private const val TAG = "RecordingActivity"
+    }
 
     private enum class State {
         IDLE, RECORDING, PREVIEWING, PREVIEW_PAUSED
@@ -50,6 +56,7 @@ class RecordingActivity : AppCompatActivity() {
     private var videoUri: Uri? = null
     private var currentState = State.IDLE
     private var recordingStartPositionMs: Long = 0
+    private var activeJob: Job? = null
 
     private val handler = Handler(Looper.getMainLooper())
     private val scope = MainScope()
@@ -269,42 +276,49 @@ class RecordingActivity : AppCompatActivity() {
     private fun startPreview() {
         if (segmentManager.segmentCount == 0) return
 
-        statusText.text = getString(R.string.saving) // show brief "preparing" state
+        statusText.text = getString(R.string.saving)
         recordFab.isEnabled = false
 
-        scope.launch {
-            val mergedFile = File(cacheDir, "preview_merged_${System.currentTimeMillis()}.m4a")
-            val success = withContext(Dispatchers.IO) {
-                segmentManager.mergeToFile(videoView.duration.toLong(), mergedFile)
-            }
+        activeJob = scope.launch {
+            try {
+                val mergedFile = File(cacheDir, "preview_merged_${System.currentTimeMillis()}.m4a")
+                val success = withContext(Dispatchers.IO) {
+                    segmentManager.mergeToFile(videoView.duration.toLong(), mergedFile)
+                }
 
-            recordFab.isEnabled = true
+                recordFab.isEnabled = true
 
-            if (!success) {
-                Toast.makeText(this@RecordingActivity, "Preview merge failed", Toast.LENGTH_SHORT).show()
+                if (!success) {
+                    Toast.makeText(this@RecordingActivity, "Preview merge failed", Toast.LENGTH_SHORT).show()
+                    transitionTo(State.IDLE)
+                    return@launch
+                }
+
+                // Mute video and play merged audio
+                releaseAudioPlayer()
+                audioPlayer = MediaPlayer().apply {
+                    setDataSource(mergedFile.absolutePath)
+                    prepare()
+                    seekTo(0)
+                }
+
+                videoView.setVideoURI(videoUri)
+                videoView.setOnPreparedListener { mp ->
+                    mp.setVolume(0f, 0f)
+                    mp.isLooping = false
+                    videoView.start()
+                    audioPlayer?.start()
+                    handler.post(updateProgress)
+                    transitionTo(State.PREVIEWING)
+                }
+                videoView.setOnCompletionListener {
+                    stopPreview()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Preview failed", e)
+                Toast.makeText(this@RecordingActivity, "Preview failed", Toast.LENGTH_SHORT).show()
+                recordFab.isEnabled = true
                 transitionTo(State.IDLE)
-                return@launch
-            }
-
-            // Mute video and play merged audio
-            releaseAudioPlayer()
-            audioPlayer = MediaPlayer().apply {
-                setDataSource(mergedFile.absolutePath)
-                prepare()
-                seekTo(0)
-            }
-
-            videoView.setVideoURI(videoUri)
-            videoView.setOnPreparedListener { mp ->
-                mp.setVolume(0f, 0f)
-                mp.isLooping = false
-                videoView.start()
-                audioPlayer?.start()
-                handler.post(updateProgress)
-                transitionTo(State.PREVIEWING)
-            }
-            videoView.setOnCompletionListener {
-                stopPreview()
             }
         }
     }
@@ -367,51 +381,60 @@ class RecordingActivity : AppCompatActivity() {
         recordFab.isEnabled = false
         statusText.text = getString(R.string.saving)
 
-        scope.launch {
-            // First merge segments into single audio
-            val mergedAudio = File(cacheDir, "merged_audio_${System.currentTimeMillis()}.m4a")
-            val mergeSuccess = withContext(Dispatchers.IO) {
-                segmentManager.mergeToFile(videoView.duration.toLong(), mergedAudio)
-            }
+        activeJob = scope.launch {
+            try {
+                // First merge segments into single audio
+                val mergedAudio = File(cacheDir, "merged_audio_${System.currentTimeMillis()}.m4a")
+                val mergeSuccess = withContext(Dispatchers.IO) {
+                    segmentManager.mergeToFile(videoView.duration.toLong(), mergedAudio)
+                }
 
-            if (!mergeSuccess) {
-                statusText.text = getString(R.string.error_recording)
-                Toast.makeText(this@RecordingActivity, getString(R.string.error_recording), Toast.LENGTH_LONG).show()
+                if (!mergeSuccess) {
+                    statusText.text = getString(R.string.error_recording)
+                    Toast.makeText(this@RecordingActivity, getString(R.string.error_recording), Toast.LENGTH_LONG).show()
+                    saveButton.isEnabled = true
+                    reRecordButton.isEnabled = true
+                    recordFab.isEnabled = true
+                    return@launch
+                }
+
+                // Then mux audio with video
+                val outputFile = File(cacheDir, "voiceover_${System.currentTimeMillis()}.mp4")
+                val mixer = AudioMixer(this@RecordingActivity)
+                val success = withContext(Dispatchers.IO) {
+                    mixer.mergeAudioVideo(uri, mergedAudio, outputFile)
+                }
+                mergedAudio.delete()
+
+                if (success) {
+                    val savedUri = withContext(Dispatchers.IO) {
+                        saveToMediaStore(outputFile)
+                    }
+                    outputFile.delete()
+
+                    if (savedUri != null) {
+                        statusText.text = getString(R.string.saved)
+                        Toast.makeText(this@RecordingActivity, getString(R.string.saved), Toast.LENGTH_LONG).show()
+                    } else {
+                        statusText.text = "Save failed"
+                        Toast.makeText(this@RecordingActivity, "Failed to save", Toast.LENGTH_LONG).show()
+                    }
+                } else {
+                    statusText.text = getString(R.string.error_recording)
+                    Toast.makeText(this@RecordingActivity, getString(R.string.error_recording), Toast.LENGTH_LONG).show()
+                }
+
                 saveButton.isEnabled = true
                 reRecordButton.isEnabled = true
                 recordFab.isEnabled = true
-                return@launch
-            }
-
-            // Then mux audio with video
-            val outputFile = File(cacheDir, "voiceover_${System.currentTimeMillis()}.mp4")
-            val mixer = AudioMixer(this@RecordingActivity)
-            val success = withContext(Dispatchers.IO) {
-                mixer.mergeAudioVideo(uri, mergedAudio, outputFile)
-            }
-            mergedAudio.delete()
-
-            if (success) {
-                val savedUri = withContext(Dispatchers.IO) {
-                    saveToMediaStore(outputFile)
-                }
-                outputFile.delete()
-
-                if (savedUri != null) {
-                    statusText.text = getString(R.string.saved)
-                    Toast.makeText(this@RecordingActivity, getString(R.string.saved), Toast.LENGTH_LONG).show()
-                } else {
-                    statusText.text = "Save failed"
-                    Toast.makeText(this@RecordingActivity, "Failed to save", Toast.LENGTH_LONG).show()
-                }
-            } else {
+            } catch (e: Exception) {
+                Log.e(TAG, "Save failed", e)
                 statusText.text = getString(R.string.error_recording)
-                Toast.makeText(this@RecordingActivity, getString(R.string.error_recording), Toast.LENGTH_LONG).show()
+                Toast.makeText(this@RecordingActivity, "Save failed", Toast.LENGTH_LONG).show()
+                saveButton.isEnabled = true
+                reRecordButton.isEnabled = true
+                recordFab.isEnabled = true
             }
-
-            saveButton.isEnabled = true
-            reRecordButton.isEnabled = true
-            recordFab.isEnabled = true
         }
     }
 
@@ -486,6 +509,7 @@ class RecordingActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        activeJob?.cancel()
         handler.removeCallbacks(updateProgress)
         releaseAudioPlayer()
         audioRecorder?.release()

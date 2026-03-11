@@ -7,5 +7,10 @@ data class RecordedSegment(
     val startPositionMs: Long,
     val durationMs: Long
 ) {
+    init {
+        require(startPositionMs >= 0) { "startPositionMs must be non-negative" }
+        require(durationMs > 0) { "durationMs must be positive" }
+    }
+
     val endPositionMs: Long get() = startPositionMs + durationMs
 }

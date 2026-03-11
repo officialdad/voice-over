@@ -6,10 +6,15 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.net.Uri
+import android.util.Log
 import java.io.File
 import java.nio.ByteBuffer
 
 class AudioMixer(private val context: Context) {
+
+    companion object {
+        private const val TAG = "AudioMixer"
+    }
 
     fun mergeAudioVideo(videoUri: Uri, audioFile: File, outputFile: File): Boolean {
         var muxer: MediaMuxer? = null
@@ -21,10 +26,9 @@ class AudioMixer(private val context: Context) {
 
             // Extract video track
             videoExtractor = MediaExtractor().apply {
-                val fd = context.contentResolver.openFileDescriptor(videoUri, "r")
-                    ?: return false
-                setDataSource(fd.fileDescriptor)
-                fd.close()
+                context.contentResolver.openFileDescriptor(videoUri, "r")?.use { fd ->
+                    setDataSource(fd.fileDescriptor)
+                } ?: return false
             }
 
             val videoTrackIndex = findTrack(videoExtractor, "video/")
@@ -58,7 +62,7 @@ class AudioMixer(private val context: Context) {
             return true
 
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "Failed to merge audio and video", e)
             return false
         } finally {
             try { muxer?.release() } catch (_: Exception) {}
@@ -77,7 +81,7 @@ class AudioMixer(private val context: Context) {
     }
 
     private fun writeSamples(extractor: MediaExtractor, muxer: MediaMuxer, trackIndex: Int) {
-        val buffer = ByteBuffer.allocate(1024 * 1024)
+        val buffer = ByteBuffer.allocate(256 * 1024)
         val bufferInfo = MediaCodec.BufferInfo()
 
         while (true) {
