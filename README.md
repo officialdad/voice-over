@@ -1,147 +1,110 @@
-# Build Apps with Termux
+<div align="center">
 
-In this tutorial, you'll learn how to build APKs with Termux, without needing Proot.
+# Voice Over
 
-> [!NOTE]
-> This guide assumes familiarity with Termux and Gradle basics. The steps below will help you get set up quickly.
+**Record voice narration over videos with synchronized preview**
 
-After facing challenges in building apps and testing multiple methods, I've put together the best way to do it. You can use the automated setup script or follow the manual steps below.
-
-## Quick Setup (Automated)
-
-The fastest way to set up your build environment is using the automated setup script:
-
-```bash
-# Download and run the setup script
-wget -O ~/termux-setup.sh https://raw.githubusercontent.com/illegalvoid/termux-build-apps/main/setup.sh
-chmod +x ~/termux-setup.sh
-bash ~/termux-setup.sh
-```
-
-After the script completes, restart your terminal or run:
-```bash
-source ~/.bashrc
-```
-
-The script will automatically:
-- Update Termux packages
-- Install Java 21 (latest LTS)
-- Install Android SDK
-- Accept SDK licenses
-- Install Android Platform API 35
-- Install Gradle 8.10.2 (latest stable)
-- Configure aapt2 path
-- Set up all environment variables
-
-## Manual Setup
-
-If you prefer to set things up manually, follow these steps:
-
-### 1. Install Termux
-
-[Termux](https://github.com/termux/termux-app/releases) is a powerful terminal app for Android, and it will serve as your development environment.
-
-### 2. Install Required Packages
-
-Before setting up the Android SDK, you'll need some essential packages in Termux. This tutorial uses `Java 21` (latest LTS version).
-
-```bash
-# First update & upgrade
-pkg update -y && pkg upgrade -y
-# Then install jdk and wget
-pkg install wget openjdk-21 -y
-```
-
-> **Simple Check (JDK):**  
-> To confirm Java is installed correctly, run:
-> ```bash
-> java -version
-> ```
-> It should output information about JDK version 21.
-
-### 3. Install Android SDK
-
-Next, we need the Android SDK. You can find setup in this [repository](https://github.com/Sohil876/termux-sdk-installer), or run the following commands directly:
-
-```bash
-# Download the installer script using wget and save it to the home directory
-wget -O ~/install-android-sdk.sh https://raw.githubusercontent.com/Sohil876/termux-sdk-installer/main/installer.sh
-# Make the script executable
-chmod +x ~/install-android-sdk.sh
-# Run the script with the install option
-bash ~/install-android-sdk.sh -i
-```
-
-Once the SDK is installed, you'll see a new directory named `android-sdk` in your Termux files. This directory contains all necessary tools.
-
-Before moving on, you must accept Google licenses:
-
-```bash
-yes | sdkmanager --licenses
-```
-
-Set the Android platform version to latest, which is `35` (Android 15):
-
-```bash
-yes | sdkmanager "platforms;android-35"
-```
-
-### 4. Install Gradle
-
-You'll need Gradle `v8.10.2` (latest stable version), which is compatible with Java 21. Download and set it up as follows:
-
-```bash
-# Download Gradle
-wget -O $ANDROID_HOME/gradle-8.10.2-bin.zip https://services.gradle.org/distributions/gradle-8.10.2-bin.zip
-# Unzip it
-unzip $ANDROID_HOME/gradle-8.10.2-bin.zip -d $ANDROID_HOME/
-mv $ANDROID_HOME/gradle-8.10.2/ $ANDROID_HOME/gradle/
-# Remove zip file (optional)
-rm $ANDROID_HOME/gradle-8.10.2-bin.zip
-# Add Gradle to your PATH
-echo 'export PATH=${PATH}:${ANDROID_HOME}/gradle/bin' >> ~/.bashrc
-source ~/.bashrc
-```
-
-Now you can run Gradle and the Android SDK for any task you need.
-
-> **Simple Check (Gradle):**  
-> To verify Gradle is working, run:
-> ```bash
-> gradle -v
-> ```
-> It should show version info such as: `Gradle 8.10.2`
-
-### 5. Fix aapt2 Issue
-
-There's a known issue with Gradle in Termux where it cannot find the `aapt2` build tool. To fix this, specify it in the global Gradle properties.
-
-Go to the file `~/.gradle/gradle.properties` (create it if it doesn't exist) and add:
-
-```properties
-android.aapt2FromMavenOverride=/data/data/com.termux/files/home/android-sdk/build-tools/<version>/aapt2
-```
-
-Replace `<version>` with the actual version you have in your SDK (you can find it by running `ls ~/android-sdk/build-tools/`).
+[![Latest Release](https://img.shields.io/github/v/release/officialdad/voice-over)](https://github.com/officialdad/voice-over/releases/latest)
+[![License](https://img.shields.io/github/license/officialdad/voice-over)](LICENSE)
 
 ---
 
-## Current Versions
+</div>
 
-- **Java:** OpenJDK 21 (LTS)
-- **Gradle:** 8.10.2 (latest stable)
-- **Android Platform:** API 35 (Android 15)
-- **Build Tools:** Latest available via SDK Manager
+## Installation
 
-## Troubleshooting
+### Obtainium (Recommended)
 
-If you encounter any issues:
+[<img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/icon_small.png" alt="Get it on Obtainium" height="80">](https://github.com/ImranR98/Obtainium)
 
-1. **Gradle daemon issues:** Run `gradle --stop` and try again
-2. **Permission errors:** Make sure all scripts have execute permissions with `chmod +x`
-3. **Path issues:** Ensure you've run `source ~/.bashrc` after installation
-4. **Build failures:** Check that your project's `build.gradle` targets compatible SDK versions
+1. Install Obtainium
+2. Add app with URL: `https://github.com/officialdad/voice-over`
+3. Obtainium will download & notify you of updates automatically
 
----
+### GitHub Release
 
-**Congratulations!** You can now build Android apps using Termux, without Proot. Enjoy coding!
+[<img src="https://github.com/machiav3lli/oandbackupx/blob/034b226cea5c1b30eb4f6a6f313e4dadcbb0ece4/badge_github.png" alt="Get it on GitHub" height="80">](https://github.com/officialdad/voice-over/releases/latest)
+
+1. Download the `voice-over.apk` in release
+2. Install app normally
+
+## Features
+
+- **Video Selection** - Pick any video from your device to narrate over
+
+- **Multi-Segment Recording** - Record voice at any point on the video timeline
+  - Seek to different positions and record multiple segments
+  - Last-recorded segment wins on overlap
+
+- **Segment Timeline** - Visual indicator showing where you've recorded on the video
+
+- **Preview Playback** - Listen to your recording synced with the video before saving
+  - Pause/resume preview at any time
+  - Seek through the preview
+
+- **Save & Export** - Merges voice recording onto the video and saves to Movies/VoiceOver
+
+- **Aspect Ratio Preserved** - Video preview maintains original proportions
+
+## Usage
+
+### Recording Flow
+
+| Step | Action |
+|------|--------|
+| **1** | Select a video from your device |
+| **2** | Seek to the position where you want to narrate |
+| **3** | Tap the mic button to start recording |
+| **4** | Tap stop to end the segment |
+| **5** | Repeat steps 2-4 for additional segments |
+| **6** | Tap Preview to hear your narration with the video |
+| **7** | Tap Save to export the final video |
+
+### Controls
+
+| Button | Action |
+|--------|--------|
+| **Mic** | Start recording at current position |
+| **Stop** | End current recording segment |
+| **Preview** | Play video with recorded audio |
+| **Re-record** | Clear all segments and start over |
+| **Save** | Merge audio and export video |
+
+## System Requirements
+
+- **Android 7.0+** (API 24 or higher)
+- **Permissions:** Microphone, Media access
+
+## Building
+
+### Termux (Android)
+
+```bash
+gradle assembleDebug
+```
+
+### Linux/macOS
+
+```bash
+./gradlew assembleDebug
+```
+
+### Windows
+
+```bash
+gradlew.bat assembleDebug
+```
+
+**Output:** `app/build/outputs/apk/debug/app-debug.apk`
+
+## Contributing
+
+Contributions are welcome! Feel free to:
+
+- Report bugs
+- Suggest features
+- Submit pull requests
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
