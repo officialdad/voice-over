@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Voice Over</string>
+    <string name="pick_video">Select Video</string>
+    <string name="no_video_selected">No video selected</string>
+    <string name="start_recording">Tap to start recording</string>
+    <string name="recording">Recording…</string>
+    <string name="saving">Saving…</string>
+    <string name="saved">Video saved!</string>
+    <string name="error_recording">Recording failed</string>
+    <string name="permission_required">Permissions required to use this app</string>
+    <string name="grant_permissions">Grant Permissions</string>
+    <string name="record_voice">Record Voice</string>
+    <string name="stop_recording">Stop Recording</string>
+    <string name="save_video">Save Video</string>
+    <string name="re_record">Re-record</string>
+    <string name="play">Play</string>
+    <string name="pause">Pause</string>
+    <string name="paused">Paused</string>
+    <string name="recording_complete">Recording complete</string>
+    <string name="previewing">Previewing…</string>
+    <string name="preview_paused">Preview paused</string>
+    <string name="preview">Preview</string>
+    <string name="segments_count">%d segment(s) recorded</string>
+    <string name="tap_to_record">Seek to position, then tap to record</string>
+    <string name="ready_to_record">Ready to record at current position</string>
+</resources>
