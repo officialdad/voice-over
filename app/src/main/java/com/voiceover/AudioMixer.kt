@@ -100,6 +100,7 @@ class AudioMixer(private val context: Context) {
     }
 
     private fun writeSamples(extractor: MediaExtractor, muxer: MediaMuxer, trackIndex: Int) {
+        val MAX_BUFFER_SIZE = 8 * 1024 * 1024 // 8MB
         var buffer = ByteBuffer.allocate(1024 * 1024) // 1MB initial
         val bufferInfo = MediaCodec.BufferInfo()
 
@@ -118,6 +119,10 @@ class AudioMixer(private val context: Context) {
             } catch (e: IllegalArgumentException) {
                 // Buffer too small for this sample, double it and retry
                 val newSize = buffer.capacity() * 2
+                if (newSize > MAX_BUFFER_SIZE) {
+                    Log.e(TAG, "Buffer size exceeded max limit of $MAX_BUFFER_SIZE bytes, aborting write")
+                    break
+                }
                 buffer = ByteBuffer.allocate(newSize)
             }
         }

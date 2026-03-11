@@ -72,6 +72,7 @@ class RecordingActivity : AppCompatActivity() {
     private var currentState = State.IDLE
     private var recordingStartPositionMs: Long = 0
     private var activeJob: Job? = null
+    private var previewTempFile: File? = null
 
     private val handler = Handler(Looper.getMainLooper())
     private val scope = MainScope()
@@ -92,7 +93,7 @@ class RecordingActivity : AppCompatActivity() {
                 timeText.text = "${formatTime(current)} / ${formatTime(duration)}"
                 segmentTimeline.setCurrentPosition(current.toLong())
             }
-            handler.postDelayed(this, 100)
+            handler.postDelayed(this, 250)
         }
     }
 
@@ -130,6 +131,11 @@ class RecordingActivity : AppCompatActivity() {
         }
         videoUri = Uri.parse(uriString)
 
+        // Clean up old preview temp files
+        cacheDir.listFiles()?.filter {
+            it.name.startsWith("preview_voice_") || it.name.startsWith("merged_audio_") || it.name.startsWith("voiceover_")
+        }?.forEach { it.delete() }
+
         setupVideoPlayer()
         setupControls()
         transitionTo(State.IDLE)
@@ -161,6 +167,8 @@ class RecordingActivity : AppCompatActivity() {
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
+
+        activeJob?.cancel()
 
         // Save current state before re-layout
         val currentPosition = videoView.currentPosition
@@ -436,10 +444,13 @@ class RecordingActivity : AppCompatActivity() {
         recordFab.isEnabled = false
         loadingSpinner.visibility = View.VISIBLE
 
+        activeJob?.cancel()
         activeJob = scope.launch {
             try {
                 // Merge voice segments only (no original audio mixed in) for independent volume control
+                previewTempFile?.delete()
                 val mergedFile = File(cacheDir, "preview_voice_${System.currentTimeMillis()}.m4a")
+                previewTempFile = mergedFile
                 val success = withContext(Dispatchers.IO) {
                     segmentManager.mergeToFile(
                         videoView.duration.toLong(),
@@ -461,10 +472,16 @@ class RecordingActivity : AppCompatActivity() {
                 // Play video with original audio + voice as separate streams
                 // Both controlled by sliders in real-time
                 releaseAudioPlayer()
-                audioPlayer = MediaPlayer().apply {
-                    setDataSource(mergedFile.absolutePath)
-                    prepare()
-                    seekTo(0)
+                try {
+                    audioPlayer = MediaPlayer().apply {
+                        setDataSource(mergedFile.absolutePath)
+                        prepare()
+                        seekTo(0)
+                    }
+                } catch (e: Exception) {
+                    audioPlayer?.release()
+                    audioPlayer = null
+                    throw e
                 }
 
                 videoView.setVideoURI(videoUri)
@@ -507,6 +524,8 @@ class RecordingActivity : AppCompatActivity() {
     private fun stopPreview() {
         videoView.pause()
         releaseAudioPlayer()
+        previewTempFile?.delete()
+        previewTempFile = null
         handler.removeCallbacks(updateProgress)
 
         // Restore video audio
@@ -550,6 +569,7 @@ class RecordingActivity : AppCompatActivity() {
         recordFab.isEnabled = false
         statusText.text = getString(R.string.saving)
 
+        activeJob?.cancel()
         activeJob = scope.launch {
             try {
                 // First merge segments into single audio
@@ -607,6 +627,7 @@ class RecordingActivity : AppCompatActivity() {
                         Toast.makeText(this@RecordingActivity, "Failed to save", Toast.LENGTH_LONG).show()
                     }
                 } else {
+                    outputFile.delete()
                     showDebugDialog("Mux Failed", "SegmentMerge:\n${segmentManager.lastMergeLog}\n\nAudioMixer:\n${mixer.lastMergeLog}")
                 }
 
@@ -693,6 +714,7 @@ class RecordingActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
+        handler.removeCallbacks(updateProgress)
         when (currentState) {
             State.RECORDING -> stopSegmentRecording()
             State.PREVIEWING -> pausePreview()
@@ -705,9 +727,15 @@ class RecordingActivity : AppCompatActivity() {
         activeJob?.cancel()
         handler.removeCallbacks(updateProgress)
         releaseAudioPlayer()
+        previewTempFile?.delete()
         videoMediaPlayer = null
         audioRecorder?.release()
         segmentManager.clearAll()
         scope.cancel()
+
+        // Clean up all temp files
+        cacheDir.listFiles()?.filter {
+            it.name.startsWith("preview_voice_") || it.name.startsWith("merged_audio_") || it.name.startsWith("voiceover_")
+        }?.forEach { it.delete() }
     }
 }
