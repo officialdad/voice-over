@@ -57,13 +57,15 @@ class SegmentManager {
     private fun handleOverlap(newSegment: RecordedSegment) {
         val toRemove = mutableListOf<Int>()
         val toAdd = mutableListOf<RecordedSegment>()
+        // Tolerance for adjacent segments - seekTo lands on keyframes so positions can be slightly off
+        val overlapToleranceMs = 200L
 
         for (i in _segments.indices) {
             val existing = _segments[i]
 
-            // No overlap
+            // No overlap (with tolerance for adjacent segments)
             if (newSegment.endPositionMs <= existing.startPositionMs ||
-                newSegment.startPositionMs >= existing.endPositionMs) {
+                newSegment.startPositionMs + overlapToleranceMs >= existing.endPositionMs) {
                 continue
             }
 
@@ -149,6 +151,15 @@ class SegmentManager {
                     continue
                 }
                 log.appendLine("  seg[$i] decoded ${segmentPcm.size} samples")
+
+                // Apply fade-out to last 50ms to eliminate stop click/pop
+                val fadeOutSamples = minOf((SAMPLE_RATE * 50 / 1000), segmentPcm.size)
+                val fadeStart = segmentPcm.size - fadeOutSamples
+                for (j in 0 until fadeOutSamples) {
+                    val factor = 1.0f - (j.toFloat() / fadeOutSamples)
+                    segmentPcm[fadeStart + j] = (segmentPcm[fadeStart + j] * factor).toInt().toShort()
+                }
+
                 val offset = (segment.startPositionMs * SAMPLE_RATE / 1000).toInt()
                 val copyLength = minOf(segmentPcm.size, totalSamples - offset)
                 if (copyLength > 0) {

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Play overlay on video -->
+    <dimen name="play_overlay_size">64dp</dimen>
+    <dimen name="play_overlay_padding">16dp</dimen>
+
+    <!-- Loading spinner -->
+    <dimen name="loading_spinner_size">48dp</dimen>
+
+    <!-- Record FAB + pulse container -->
+    <dimen name="record_pulse_size">80dp</dimen>
+    <dimen name="record_fab_size">64dp</dimen>
+    <dimen name="record_fab_icon_size">32dp</dimen>
+
+    <!-- Action buttons -->
+    <dimen name="action_button_size">48dp</dimen>
+    <dimen name="save_fab_size">56dp</dimen>
+    <dimen name="save_fab_icon_size">24dp</dimen>
+    <dimen name="action_button_spacing">24dp</dimen>
+
+    <!-- Controls area -->
+    <dimen name="controls_padding">16dp</dimen>
+
+    <!-- Timeline -->
+    <dimen name="timeline_height">8dp</dimen>
+</resources>

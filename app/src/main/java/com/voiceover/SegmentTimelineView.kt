@@ -55,24 +55,30 @@ class SegmentTimelineView @JvmOverloads constructor(
 
         val w = width.toFloat()
         val h = height.toFloat()
+        val left = 0f
+        val right = w
+        val trackWidth = right - left
         val cornerRadius = h / 2
 
         // Background track
-        rect.set(0f, 0f, w, h)
+        rect.set(left, 0f, right, h)
         canvas.drawRoundRect(rect, cornerRadius, cornerRadius, backgroundPaint)
 
-        // Draw segments
+        // Draw segments - extend past view bounds for edge segments so view clipping
+        // creates flat edges instead of rounded corners leaving gray gaps
         for (segment in segments) {
-            val startX = ((segment.startPositionMs.toFloat() / videoDurationMs) * w).coerceIn(0f, w)
-            val endX = ((segment.endPositionMs.toFloat() / videoDurationMs) * w).coerceIn(0f, w)
+            val startX = (left + (segment.startPositionMs.toFloat() / videoDurationMs) * trackWidth).coerceIn(left, right)
+            val endX = (left + (segment.endPositionMs.toFloat() / videoDurationMs) * trackWidth).coerceIn(left, right)
             if (endX > startX) {
-                rect.set(startX, 0f, endX, h)
+                val drawLeft = if (segment.startPositionMs <= 0) startX - cornerRadius else startX
+                val drawRight = if (segment.endPositionMs >= videoDurationMs) endX + cornerRadius else endX
+                rect.set(drawLeft, 0f, drawRight, h)
                 canvas.drawRoundRect(rect, cornerRadius, cornerRadius, segmentPaint)
             }
         }
 
         // Position indicator
-        val posX = ((currentPositionMs.toFloat() / videoDurationMs) * w).coerceIn(0f, w)
+        val posX = (left + (currentPositionMs.toFloat() / videoDurationMs) * trackWidth).coerceIn(left, right)
         canvas.drawLine(posX, 0f, posX, h, positionPaint)
     }
 }

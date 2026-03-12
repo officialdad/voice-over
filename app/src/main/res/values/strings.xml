@@ -26,4 +26,6 @@
     <string name="ready_to_record">Ready to record at current position</string>
     <string name="original_audio">Original Audio</string>
     <string name="voice_over_audio">Voice Over</string>
+    <string name="done">Done</string>
+    <string name="stop_preview">Stop Preview</string>
 </resources>

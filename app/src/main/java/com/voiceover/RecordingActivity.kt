@@ -44,7 +44,7 @@ class RecordingActivity : AppCompatActivity() {
     }
 
     private enum class State {
-        IDLE, RECORDING, PREVIEWING, PREVIEW_PAUSED
+        IDLE, RECORDING, RECORDING_PAUSED, PREVIEWING
     }
 
     private lateinit var videoView: VideoView
@@ -57,7 +57,7 @@ class RecordingActivity : AppCompatActivity() {
     private lateinit var recordPulse: View
     private lateinit var stopButton: MaterialButton
     private lateinit var reRecordButton: MaterialButton
-    private lateinit var saveButton: MaterialButton
+    private lateinit var saveButton: FloatingActionButton
     private lateinit var playOverlay: ImageView
     private lateinit var loadingSpinner: View
     private lateinit var volumeControls: View
@@ -71,8 +71,11 @@ class RecordingActivity : AppCompatActivity() {
     private var videoUri: Uri? = null
     private var currentState = State.IDLE
     private var recordingStartPositionMs: Long = 0
+    private var lastKnownPositionMs: Long = 0
     private var activeJob: Job? = null
     private var previewTempFile: File? = null
+    private var suppressAutoPlay = false
+    private var videoPrepared = false
 
     private val handler = Handler(Looper.getMainLooper())
     private val scope = MainScope()
@@ -92,6 +95,20 @@ class RecordingActivity : AppCompatActivity() {
                 seekBar.progress = current
                 timeText.text = "${formatTime(current)} / ${formatTime(duration)}"
                 segmentTimeline.setCurrentPosition(current.toLong())
+                lastKnownPositionMs = current.toLong()
+
+                // Show live recording segment growing in real-time
+                if (currentState == State.RECORDING && current.toLong() > recordingStartPositionMs) {
+                    val liveDuration = current.toLong() - recordingStartPositionMs
+                    if (liveDuration > 0) {
+                        val liveSegment = RecordedSegment(
+                            audioFile = java.io.File(""),
+                            startPositionMs = recordingStartPositionMs,
+                            durationMs = liveDuration
+                        )
+                        segmentTimeline.setSegments(segmentManager.segments + liveSegment)
+                    }
+                }
             }
             handler.postDelayed(this, 250)
         }
@@ -99,6 +116,30 @@ class RecordingActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Global crash catcher - write to file for display on next launch
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            Log.e(TAG, "UNCAUGHT EXCEPTION", throwable)
+            try {
+                val crashFile = File(cacheDir, "last_crash.txt")
+                crashFile.writeText("${throwable.javaClass.simpleName}: ${throwable.message}\n\n${throwable.stackTraceToString().take(2000)}")
+            } catch (_: Exception) {}
+            defaultHandler?.uncaughtException(thread, throwable)
+        }
+
+        // Show last crash if any
+        val crashFile = File(cacheDir, "last_crash.txt")
+        if (crashFile.exists()) {
+            val crashInfo = crashFile.readText()
+            crashFile.delete()
+            android.app.AlertDialog.Builder(this)
+                .setTitle("Previous Crash Report")
+                .setMessage(crashInfo)
+                .setPositiveButton("OK", null)
+                .show()
+        }
+
         setContentView(R.layout.activity_recording)
 
         videoView = findViewById(R.id.videoView)
@@ -113,7 +154,13 @@ class RecordingActivity : AppCompatActivity() {
         reRecordButton = findViewById(R.id.reRecordButton)
         saveButton = findViewById(R.id.saveButton)
         playOverlay = findViewById(R.id.playOverlay)
-        playOverlay.setOnClickListener { startPreview() }
+        playOverlay.setOnClickListener {
+            when (currentState) {
+                State.IDLE -> if (segmentManager.segmentCount > 0) startPreview()
+                State.RECORDING_PAUSED -> startPreview()
+                else -> {}
+            }
+        }
         loadingSpinner = findViewById(R.id.loadingSpinner)
         volumeControls = findViewById(R.id.volumeControls)
         originalVolumeSlider = findViewById(R.id.originalVolumeSlider)
@@ -147,12 +194,18 @@ class RecordingActivity : AppCompatActivity() {
                 videoUri = Uri.parse(uriStr)
                 videoView.setVideoURI(videoUri)
                 videoView.setOnPreparedListener { mp ->
+                    videoMediaPlayer = mp
                     mp.isLooping = false
                     val duration = videoView.duration
                     seekBar.max = duration
                     timeText.text = "${formatTime(position)} / ${formatTime(duration)}"
                     segmentTimeline.setVideoDuration(duration.toLong())
+                    applyVolumeLevels()
                     videoView.seekTo(position)
+                    if (suppressAutoPlay) {
+                        suppressAutoPlay = false
+                        videoView.pause()
+                    }
                 }
             }
         }
@@ -196,7 +249,13 @@ class RecordingActivity : AppCompatActivity() {
         reRecordButton = findViewById(R.id.reRecordButton)
         saveButton = findViewById(R.id.saveButton)
         playOverlay = findViewById(R.id.playOverlay)
-        playOverlay.setOnClickListener { startPreview() }
+        playOverlay.setOnClickListener {
+            when (currentState) {
+                State.IDLE -> if (segmentManager.segmentCount > 0) startPreview()
+                State.RECORDING_PAUSED -> startPreview()
+                else -> {}
+            }
+        }
         loadingSpinner = findViewById(R.id.loadingSpinner)
         volumeControls = findViewById(R.id.volumeControls)
         originalVolumeSlider = findViewById(R.id.originalVolumeSlider)
@@ -220,14 +279,17 @@ class RecordingActivity : AppCompatActivity() {
             applyVolumeLevels()
             videoView.seekTo(currentPosition)
 
-            if (wasPlaying && (savedState == State.RECORDING || savedState == State.PREVIEWING)) {
+            if (suppressAutoPlay) {
+                suppressAutoPlay = false
+                videoView.pause()
+            } else if (wasPlaying && (savedState == State.RECORDING || savedState == State.PREVIEWING)) {
                 videoView.start()
                 handler.post(updateProgress)
             }
         }
         videoView.setOnCompletionListener {
             when (currentState) {
-                State.RECORDING -> stopSegmentRecording()
+                State.RECORDING -> finishRecording()
                 State.PREVIEWING -> stopPreview()
                 else -> {}
             }
@@ -239,8 +301,10 @@ class RecordingActivity : AppCompatActivity() {
     }
 
     private fun setupVideoPlayer() {
+        videoPrepared = false
         videoView.setVideoURI(videoUri)
         videoView.setOnPreparedListener { mp ->
+            videoPrepared = true
             videoMediaPlayer = mp
             mp.isLooping = false
             val duration = videoView.duration
@@ -248,12 +312,20 @@ class RecordingActivity : AppCompatActivity() {
             timeText.text = "00:00 / ${formatTime(duration)}"
             segmentTimeline.setVideoDuration(duration.toLong())
             applyVolumeLevels()
-            // Show first frame instead of black screen
-            videoView.seekTo(1)
+            if (suppressAutoPlay) {
+                suppressAutoPlay = false
+                videoView.pause()
+                if (lastKnownPositionMs > 0) {
+                    videoView.seekTo(lastKnownPositionMs.toInt())
+                }
+            } else {
+                // Show first frame instead of black screen
+                videoView.seekTo(1)
+            }
         }
         videoView.setOnCompletionListener {
             when (currentState) {
-                State.RECORDING -> stopSegmentRecording()
+                State.RECORDING -> finishRecording()
                 State.PREVIEWING -> stopPreview()
                 else -> {}
             }
@@ -263,28 +335,32 @@ class RecordingActivity : AppCompatActivity() {
     private fun setupControls() {
         recordFab.setOnClickListener {
             when (currentState) {
-                State.IDLE -> startSegmentRecording()
-                State.RECORDING -> stopSegmentRecording()
-                State.PREVIEWING -> pausePreview()
-                State.PREVIEW_PAUSED -> resumePreview()
+                State.IDLE -> {
+                    if (segmentManager.segmentCount > 0) startPreview()
+                    else startRecording()
+                }
+                State.RECORDING -> pauseRecording()
+                State.RECORDING_PAUSED -> resumeRecording()
+                State.PREVIEWING -> stopPreview()
             }
         }
 
         stopButton.setOnClickListener {
             when (currentState) {
-                State.RECORDING -> stopSegmentRecording()
-                State.PREVIEWING, State.PREVIEW_PAUSED -> stopPreview()
+                State.RECORDING, State.RECORDING_PAUSED -> finishRecording()
+                State.PREVIEWING -> stopPreview()
                 else -> {}
             }
         }
 
         seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (fromUser && currentState != State.RECORDING) {
+                if (fromUser && (currentState == State.PREVIEWING || currentState == State.IDLE)) {
                     videoView.seekTo(progress)
                     audioPlayer?.seekTo(progress)
                     timeText.text = "${formatTime(progress)} / ${formatTime(videoView.duration)}"
                     segmentTimeline.setCurrentPosition(progress.toLong())
+                    lastKnownPositionMs = progress.toLong()
                 }
             }
             override fun onStartTrackingTouch(sb: SeekBar?) {}
@@ -307,8 +383,8 @@ class RecordingActivity : AppCompatActivity() {
     }
 
     private fun applyVolumeLevels() {
-        // During recording, always mute video audio so mic doesn't pick it up
-        // Volume sliders only affect the final saved/previewed output uniformly
+        // During active recording, mute video audio so mic doesn't pick it up
+        // RECORDING_PAUSED is fine - mic is stopped
         if (currentState == State.RECORDING) {
             videoMediaPlayer?.setVolume(0f, 0f)
         } else {
@@ -322,113 +398,257 @@ class RecordingActivity : AppCompatActivity() {
     private fun transitionTo(state: State) {
         currentState = state
         val hasSegments = segmentManager.segmentCount > 0
+        val subtleColor = MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnSurfaceVariant, Color.GRAY)
+
+        // Seekbar: only interactive during idle and preview
+        seekBar.isEnabled = state == State.IDLE || state == State.PREVIEWING
+
+        // Volume controls: hide during recording (irrelevant - audio muted)
+        volumeControls.visibility = if (state == State.RECORDING || state == State.RECORDING_PAUSED) View.GONE else View.VISIBLE
+
+        // Play overlay: only in IDLE with segments and RECORDING_PAUSED
+        playOverlay.visibility = when {
+            state == State.IDLE && hasSegments -> View.VISIBLE
+            state == State.RECORDING_PAUSED && hasSegments -> View.VISIBLE
+            else -> View.GONE
+        }
 
         when (state) {
             State.IDLE -> {
                 requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                 handler.removeCallbacks(updateProgress)
-                recordFab.setImageResource(R.drawable.ic_mic)
-                recordFab.backgroundTintList = ColorStateList.valueOf(harmonizedRed)
+                hidePulse()
 
                 if (hasSegments) {
-                    statusText.text = getString(R.string.tap_to_record)
-                    statusText.setTextColor(MaterialColors.getColor(this@RecordingActivity, com.google.android.material.R.attr.colorOnSurfaceVariant, Color.GRAY))
+                    // Done recording: [Restart]  [▶ Play]  [Save]
+                    recordFab.setImageResource(R.drawable.ic_play)
+                    recordFab.backgroundTintList = ColorStateList.valueOf(secondaryColor)
+                    statusText.text = getString(R.string.recording_complete)
                     reRecordButton.visibility = View.VISIBLE
                     saveButton.visibility = View.VISIBLE
                     stopButton.visibility = View.GONE
-                    segmentCountText.text = getString(R.string.segments_count, segmentManager.segmentCount)
-                    segmentCountText.visibility = View.VISIBLE
-                    playOverlay.visibility = View.VISIBLE
                 } else {
+                    // Fresh start: just the mic FAB
+                    recordFab.setImageResource(R.drawable.ic_mic)
+                    recordFab.backgroundTintList = ColorStateList.valueOf(harmonizedRed)
                     statusText.text = getString(R.string.start_recording)
-                    statusText.setTextColor(MaterialColors.getColor(this@RecordingActivity, com.google.android.material.R.attr.colorOnSurfaceVariant, Color.GRAY))
                     reRecordButton.visibility = View.GONE
                     saveButton.visibility = View.GONE
                     stopButton.visibility = View.GONE
-                    segmentCountText.visibility = View.GONE
-                    playOverlay.visibility = View.GONE
                 }
-
-                hidePulse()
+                statusText.setTextColor(subtleColor)
+                segmentCountText.visibility = View.GONE
                 updateTimeline()
             }
             State.RECORDING -> {
+                // Recording: [● Pause]  + Done button
                 requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LOCKED
-                recordFab.setImageResource(R.drawable.ic_stop)
+                recordFab.setImageResource(R.drawable.ic_pause)
                 recordFab.backgroundTintList = ColorStateList.valueOf(harmonizedRed)
                 statusText.text = getString(R.string.recording)
                 statusText.setTextColor(getColor(R.color.record_red))
+                stopButton.visibility = View.VISIBLE
+                stopButton.text = getString(R.string.done)
+                reRecordButton.visibility = View.GONE
+                saveButton.visibility = View.GONE
+                segmentCountText.visibility = View.GONE
+                showPulse()
+            }
+            State.RECORDING_PAUSED -> {
+                // Paused: [🎤 Resume]  + Done button + play overlay on video
+                recordFab.setImageResource(R.drawable.ic_mic)
+                recordFab.backgroundTintList = ColorStateList.valueOf(harmonizedRed)
+                statusText.text = getString(R.string.paused)
+                statusText.setTextColor(subtleColor)
+                stopButton.visibility = View.VISIBLE
+                stopButton.text = getString(R.string.done)
+                reRecordButton.visibility = View.GONE
+                saveButton.visibility = View.GONE
+                segmentCountText.visibility = View.GONE
+                hidePulse()
+                updateTimeline()
+            }
+            State.PREVIEWING -> {
+                // Previewing: [⏹ Stop]
+                recordFab.setImageResource(R.drawable.ic_stop)
+                recordFab.backgroundTintList = ColorStateList.valueOf(secondaryColor)
+                statusText.text = getString(R.string.previewing)
+                statusText.setTextColor(secondaryColor)
                 stopButton.visibility = View.GONE
                 reRecordButton.visibility = View.GONE
                 saveButton.visibility = View.GONE
                 segmentCountText.visibility = View.GONE
-                playOverlay.visibility = View.GONE
-                showPulse()
-            }
-            State.PREVIEWING -> {
-                recordFab.setImageResource(R.drawable.ic_pause)
-                recordFab.backgroundTintList = ColorStateList.valueOf(secondaryColor)
-                statusText.text = getString(R.string.previewing)
-                statusText.setTextColor(secondaryColor)
-                stopButton.visibility = View.VISIBLE
-                stopButton.text = "Stop"
-                reRecordButton.visibility = View.GONE
-                saveButton.visibility = View.GONE
-                playOverlay.visibility = View.GONE
                 hidePulse()
-            }
-            State.PREVIEW_PAUSED -> {
-                recordFab.setImageResource(R.drawable.ic_play)
-                recordFab.backgroundTintList = ColorStateList.valueOf(secondaryColor)
-                statusText.text = getString(R.string.preview_paused)
-                statusText.setTextColor(MaterialColors.getColor(this@RecordingActivity, com.google.android.material.R.attr.colorOnSurfaceVariant, Color.GRAY))
-                playOverlay.visibility = View.GONE
             }
         }
     }
 
-    // --- Segment Recording ---
+    // --- Recording ---
+    // Each pause stops the recorder and saves a segment.
+    // Resume creates a new recorder continuing from recordingPausePositionMs.
+    // This allows preview of recorded segments while paused.
+    private var inRecordingSession = false
+    private var recordingPausePositionMs: Long = 0
+    private var segmentStartTimeReal: Long = 0  // SystemClock time when segment began
+    private val minSegmentDurationMs = 1000L     // Minimum 1s before pause is allowed
 
-    private fun startSegmentRecording() {
-        recordingStartPositionMs = videoView.currentPosition.toLong()
-        videoView.seekTo(recordingStartPositionMs.toInt())
+    private fun startRecording() {
+        val videoDuration = videoView.duration.toLong()
 
-        audioRecorder = AudioRecorderManager(this)
-        audioRecorder?.startRecording()
+        // Guard: video not prepared yet
+        if (videoDuration <= 0 || !videoPrepared) {
+            Toast.makeText(this, "Video loading, please wait...", Toast.LENGTH_SHORT).show()
+            return
+        }
 
-        // Mute video during recording so mic doesn't pick up speaker audio
-        videoMediaPlayer?.setVolume(0f, 0f)
-        videoView.start()
-        handler.post(updateProgress)
+        // Start fresh recording from beginning
+        segmentManager.clearAll()
+        lastKnownPositionMs = 0
+        recordingStartPositionMs = 0
+        recordingPausePositionMs = 0
+        videoView.seekTo(0)
+        seekBar.progress = 0
+        inRecordingSession = true
 
-        transitionTo(State.RECORDING)
+        beginRecordingSegment()
     }
 
-    private fun stopSegmentRecording() {
-        val recordingFile = audioRecorder?.recordingFile
-        val durationMs = videoView.currentPosition.toLong() - recordingStartPositionMs
+    private fun beginRecordingSegment() {
+        suppressAutoPlay = false
 
+        try {
+            audioRecorder = AudioRecorderManager(this)
+            audioRecorder?.startRecording()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start recording", e)
+            Toast.makeText(this, getString(R.string.error_recording), Toast.LENGTH_SHORT).show()
+            audioRecorder = null
+            return
+        }
+
+        videoMediaPlayer?.setVolume(0f, 0f)
+
+        // Only seek if the video isn't already at the target position.
+        // seekTo() snaps to the nearest keyframe which can jump back 1-2s,
+        // so skip it when resuming from a direct pause (video is already there).
+        val currentPos = videoView.currentPosition.toLong()
+        val needsSeek = recordingStartPositionMs > 0 &&
+                kotlin.math.abs(currentPos - recordingStartPositionMs) > 500
+
+        if (needsSeek && videoMediaPlayer != null) {
+            videoMediaPlayer?.setOnSeekCompleteListener {
+                videoMediaPlayer?.setOnSeekCompleteListener(null)
+                videoView.start()
+                handler.post(updateProgress)
+            }
+            // Use SEEK_CLOSEST on API 26+ for frame-accurate seeking
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                videoMediaPlayer?.seekTo(recordingStartPositionMs, android.media.MediaPlayer.SEEK_CLOSEST)
+            } else {
+                videoView.seekTo(recordingStartPositionMs.toInt())
+            }
+        } else {
+            videoView.start()
+            handler.post(updateProgress)
+        }
+
+        segmentStartTimeReal = android.os.SystemClock.elapsedRealtime()
+        transitionTo(State.RECORDING)
+
+        // Briefly disable pause to ensure minimum segment duration
+        recordFab.isEnabled = false
+        handler.postDelayed({ recordFab.isEnabled = true }, minSegmentDurationMs)
+    }
+
+    private fun pauseRecording() {
+        // Guard: enforce minimum segment duration
+        val elapsed = android.os.SystemClock.elapsedRealtime() - segmentStartTimeReal
+        if (elapsed < minSegmentDurationMs) return
+        // Capture position before stopping
+        val currentPos = videoView.currentPosition.toLong()
+        val videoDuration = videoView.duration.toLong()
+        val endPos = if (currentPos > recordingStartPositionMs) currentPos
+                     else if (lastKnownPositionMs > recordingStartPositionMs) lastKnownPositionMs
+                     else recordingStartPositionMs
+        val snappedEnd = if (videoDuration - endPos < 500) videoDuration else endPos
+
+        // Stop recorder and save segment
+        val recordingFile = audioRecorder?.recordingFile
         audioRecorder?.stopRecording()
+        audioRecorder = null
         videoView.pause()
         handler.removeCallbacks(updateProgress)
 
-        // Save segment if it has meaningful duration
+        val durationMs = snappedEnd - recordingStartPositionMs
         if (recordingFile != null && durationMs > 200) {
-            val segment = RecordedSegment(
+            segmentManager.addSegment(RecordedSegment(
                 audioFile = recordingFile,
                 startPositionMs = recordingStartPositionMs,
                 durationMs = durationMs
-            )
-            segmentManager.addSegment(segment)
+            ))
+        }
+        lastKnownPositionMs = snappedEnd
+        // Save position separately so preview playback can't overwrite it
+        recordingPausePositionMs = snappedEnd
+
+        transitionTo(State.RECORDING_PAUSED)
+    }
+
+    private fun resumeRecording() {
+        val videoDuration = videoView.duration.toLong()
+
+        // If at end of video, finish instead
+        if (recordingPausePositionMs >= videoDuration - 500) {
+            finishRecording()
+            return
         }
 
-        audioRecorder = null
+        // Restore position from recording pause (not preview position)
+        lastKnownPositionMs = recordingPausePositionMs
+        recordingStartPositionMs = recordingPausePositionMs
+        beginRecordingSegment()
+    }
+
+    private fun finishRecording() {
+        // If actively recording, save final segment
+        if (currentState == State.RECORDING) {
+            val currentPos = videoView.currentPosition.toLong()
+            val videoDuration = videoView.duration.toLong()
+            val endPos = maxOf(currentPos, lastKnownPositionMs)
+            val snappedEnd = if (videoDuration - endPos < 500) videoDuration else endPos
+
+            val recordingFile = audioRecorder?.recordingFile
+            audioRecorder?.stopRecording()
+            audioRecorder = null
+            videoView.pause()
+            handler.removeCallbacks(updateProgress)
+
+            val durationMs = snappedEnd - recordingStartPositionMs
+            if (recordingFile != null && durationMs > 200) {
+                segmentManager.addSegment(RecordedSegment(
+                    audioFile = recordingFile,
+                    startPositionMs = recordingStartPositionMs,
+                    durationMs = durationMs
+                ))
+            }
+            lastKnownPositionMs = snappedEnd
+        } else {
+            audioRecorder?.stopRecording()
+            audioRecorder = null
+        }
+
+        inRecordingSession = false
         transitionTo(State.IDLE)
     }
 
     private fun clearAllSegments() {
         releaseAudioPlayer()
+        audioRecorder?.stopRecording()
+        audioRecorder = null
         segmentManager.clearAll()
+        inRecordingSession = false
+        lastKnownPositionMs = 0
+        recordingPausePositionMs = 0
         videoView.seekTo(0)
         seekBar.progress = 0
         timeText.text = "00:00 / ${formatTime(videoView.duration)}"
@@ -484,11 +704,18 @@ class RecordingActivity : AppCompatActivity() {
                     throw e
                 }
 
+                videoPrepared = false
                 videoView.setVideoURI(videoUri)
                 videoView.setOnPreparedListener { mp ->
+                    videoPrepared = true
                     videoMediaPlayer = mp
                     mp.isLooping = false
-                    applyVolumeLevels() // Set both volumes from sliders
+                    applyVolumeLevels() // Always apply volumes to new MediaPlayer
+                    if (suppressAutoPlay) {
+                        suppressAutoPlay = false
+                        videoView.pause()
+                        return@setOnPreparedListener
+                    }
                     videoView.start()
                     audioPlayer?.start()
                     handler.post(updateProgress)
@@ -507,20 +734,6 @@ class RecordingActivity : AppCompatActivity() {
         }
     }
 
-    private fun pausePreview() {
-        videoView.pause()
-        audioPlayer?.pause()
-        handler.removeCallbacks(updateProgress)
-        transitionTo(State.PREVIEW_PAUSED)
-    }
-
-    private fun resumePreview() {
-        videoView.start()
-        audioPlayer?.start()
-        handler.post(updateProgress)
-        transitionTo(State.PREVIEWING)
-    }
-
     private fun stopPreview() {
         videoView.pause()
         releaseAudioPlayer()
@@ -528,24 +741,16 @@ class RecordingActivity : AppCompatActivity() {
         previewTempFile = null
         handler.removeCallbacks(updateProgress)
 
-        // Restore video audio
-        videoView.setVideoURI(videoUri)
-        videoView.setOnPreparedListener { mp ->
-            videoMediaPlayer = mp
-            mp.isLooping = false
-            seekBar.max = videoView.duration
-            segmentTimeline.setVideoDuration(videoView.duration.toLong())
-            applyVolumeLevels()
-        }
-        videoView.setOnCompletionListener {
-            when (currentState) {
-                State.RECORDING -> stopSegmentRecording()
-                State.PREVIEWING -> stopPreview()
-                else -> {}
-            }
-        }
+        // Restore video for normal use
+        suppressAutoPlay = true
+        setupVideoPlayer()
 
-        transitionTo(State.IDLE)
+        // Return to recording paused if in an active recording session
+        if (inRecordingSession) {
+            transitionTo(State.RECORDING_PAUSED)
+        } else {
+            transitionTo(State.IDLE)
+        }
     }
 
     private fun releaseAudioPlayer() {
@@ -716,10 +921,18 @@ class RecordingActivity : AppCompatActivity() {
         super.onPause()
         handler.removeCallbacks(updateProgress)
         when (currentState) {
-            State.RECORDING -> stopSegmentRecording()
-            State.PREVIEWING -> pausePreview()
+            State.RECORDING -> pauseRecording()
+            State.PREVIEWING -> stopPreview()
             else -> {}
         }
+        // Flag to prevent VideoView auto-play when surface is re-created in onResume
+        suppressAutoPlay = true
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // suppressAutoPlay is checked in all OnPreparedListener callbacks
+        // to prevent VideoView from auto-playing after surface re-creation
     }
 
     override fun onDestroy() {

@@ -26,20 +26,20 @@
 
         <ImageView
             android:id="@+id/playOverlay"
-            android:layout_width="64dp"
-            android:layout_height="64dp"
+            android:layout_width="@dimen/play_overlay_size"
+            android:layout_height="@dimen/play_overlay_size"
             android:layout_gravity="center"
             android:src="@drawable/ic_play"
             android:background="@drawable/circle_play_bg"
-            android:padding="16dp"
+            android:padding="@dimen/play_overlay_padding"
             android:visibility="gone"
             android:contentDescription="@string/preview"
             app:tint="@android:color/white" />
 
         <ProgressBar
             android:id="@+id/loadingSpinner"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
+            android:layout_width="@dimen/loading_spinner_size"
+            android:layout_height="@dimen/loading_spinner_size"
             android:layout_gravity="center"
             android:visibility="gone"
             android:indeterminate="true" />
@@ -61,20 +61,23 @@
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:gravity="center_horizontal"
-            android:padding="16dp"
+            android:padding="@dimen/controls_padding"
             android:background="?attr/colorSurface">
 
             <!-- Seekbar -->
             <SeekBar
                 android:id="@+id/seekBar"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
+                android:layout_height="wrap_content"
+                android:paddingStart="0dp"
+                android:paddingEnd="0dp"
+                android:thumbOffset="0dp" />
 
             <!-- Timeline -->
             <com.voiceover.SegmentTimelineView
                 android:id="@+id/segmentTimeline"
                 android:layout_width="match_parent"
-                android:layout_height="8dp"
+                android:layout_height="@dimen/timeline_height"
                 android:layout_marginTop="4dp" />
 
             <!-- Time display -->
@@ -152,15 +155,15 @@
 
             <!-- FAB with pulse -->
             <FrameLayout
-                android:layout_width="80dp"
-                android:layout_height="80dp"
+                android:layout_width="@dimen/record_pulse_size"
+                android:layout_height="@dimen/record_pulse_size"
                 android:layout_marginBottom="12dp"
                 android:importantForAccessibility="no">
 
                 <View
                     android:id="@+id/recordPulse"
-                    android:layout_width="80dp"
-                    android:layout_height="80dp"
+                    android:layout_width="@dimen/record_pulse_size"
+                    android:layout_height="@dimen/record_pulse_size"
                     android:background="@drawable/circle_pulse"
                     android:importantForAccessibility="no"
                     android:visibility="invisible" />
@@ -173,51 +176,55 @@
                     android:layout_gravity="center"
                     android:contentDescription="@string/start_recording"
                     app:backgroundTint="@color/record_red"
-                    app:fabCustomSize="64dp"
-                    app:maxImageSize="32dp"
+                    app:fabCustomSize="@dimen/record_fab_size"
+                    app:maxImageSize="@dimen/record_fab_icon_size"
                     app:tint="?attr/colorOnPrimary"
                     app:srcCompat="@drawable/ic_mic" />
 
             </FrameLayout>
 
-            <!-- Stop button -->
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/stopButton"
-                style="@style/Widget.Material3.Button.OutlinedButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:minHeight="48dp"
-                android:layout_marginBottom="8dp"
-                android:text="@string/stop_recording"
-                android:visibility="gone" />
-
-            <!-- Re-record and Save -->
+            <!-- Action buttons row -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:gravity="center">
+                android:gravity="center"
+                android:layout_marginBottom="8dp">
 
+                <!-- Re-record (restart icon) -->
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/reRecordButton"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:minHeight="48dp"
-                    android:layout_marginEnd="8dp"
-                    android:text="@string/re_record"
+                    style="@style/Widget.Material3.Button.IconButton"
+                    android:layout_width="@dimen/action_button_size"
+                    android:layout_height="@dimen/action_button_size"
+                    android:contentDescription="@string/re_record"
+                    app:icon="@drawable/ic_restart"
+                    app:iconTint="?attr/colorOnSurfaceVariant"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
                     android:visibility="gone" />
 
-                <com.google.android.material.button.MaterialButton
+                <!-- Save FAB -->
+                <com.google.android.material.floatingactionbutton.FloatingActionButton
                     android:id="@+id/saveButton"
-                    style="@style/Widget.Material3.Button"
-                    android:layout_width="0dp"
+                    style="@style/Widget.Material3.FloatingActionButton.Primary"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:minHeight="48dp"
-                    android:layout_marginStart="8dp"
-                    android:text="@string/save_video"
+                    android:layout_marginStart="@dimen/action_button_spacing"
+                    android:contentDescription="@string/save_video"
+                    app:fabCustomSize="@dimen/save_fab_size"
+                    app:maxImageSize="@dimen/save_fab_icon_size"
+                    app:srcCompat="@drawable/ic_save"
+                    android:visibility="gone" />
+
+                <!-- Stop/Done button -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/stopButton"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:minHeight="@dimen/action_button_size"
+                    android:text="@string/done"
                     android:visibility="gone" />
 
             </LinearLayout>
